@@ -32,7 +32,9 @@ repository's `PATCHES/` directory with a longer write-up.
   4-bit SD host), `drivers/spi/spi-gowin.c` (the earlier SPI-mode SD route, unused now).
 - `arch/riscv/configs/tang_mega_138k_defconfig`: the working configuration. Its
   `CONFIG_INITRAMFS_SOURCE` points at the gateware repository's `linux/rootfs` and
-  `linux/initramfs_nodes.list` by absolute path; adjust for your checkout.
+  `linux/initramfs_nodes.list` relative to this tree (`../../linux/...`), which is right
+  when this tree is checked out as the gateware repository's `external/linux` submodule;
+  adjust it for a stand-alone checkout.
 
 ## Build
 

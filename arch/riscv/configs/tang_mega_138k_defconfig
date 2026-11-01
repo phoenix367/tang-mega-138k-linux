@@ -22,7 +22,7 @@ CONFIG_NAMESPACES=y
 CONFIG_USER_NS=y
 CONFIG_CHECKPOINT_RESTORE=y
 CONFIG_BLK_DEV_INITRD=y
-CONFIG_INITRAMFS_SOURCE="/home/ivan/projects/mega_138K_test/linux/rootfs /home/ivan/projects/mega_138K_test/linux/initramfs_nodes.list"
+CONFIG_INITRAMFS_SOURCE="../../linux/rootfs ../../linux/initramfs_nodes.list"
 CONFIG_INITRAMFS_COMPRESSION_XZ=y
 CONFIG_EXPERT=y
 # CONFIG_SYSFS_SYSCALL is not set
