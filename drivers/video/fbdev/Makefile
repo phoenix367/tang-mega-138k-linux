@@ -122,6 +122,7 @@ obj-$(CONFIG_FB_EFI)              += efifb.o
 obj-$(CONFIG_FB_VGA16)            += vga16fb.o
 obj-$(CONFIG_FB_OF)               += offb.o
 obj-$(CONFIG_FB_SSD1307)	  += ssd1307fb.o
+obj-$(CONFIG_FB_GOWIN_LCD)	  += gowin-lcdfb.o
 obj-$(CONFIG_FB_SIMPLE)           += simplefb.o
 
 # the test framebuffer is last

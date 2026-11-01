@@ -76,6 +76,15 @@ config SND_PCSP
 	  Say M if you don't.
 	  Say Y only if you really know what you do.
 
+config SND_GOWIN_PT8211
+	tristate "Gowin AE350 PT8211 audio output (Tang Mega 138K Pro)"
+	depends on SND && OF
+	select SND_PCM
+	help
+	  ALSA playback driver for the PT8211 stereo DAC audio core in the
+	  Tang Mega 138K Pro AE350 gateware (sample FIFO filled from the
+	  interrupt handler, no DMA).  16-bit stereo, 8 to 96 kHz.
+
 config SND_DUMMY
 	tristate "Dummy (/dev/null) soundcard"
 	select SND_PCM

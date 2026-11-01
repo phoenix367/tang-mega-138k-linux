@@ -29,6 +29,7 @@ static inline void pmd_populate_kernel(struct mm_struct *mm,
 {
 	unsigned long pfn = virt_to_pfn(pte);
 
+	a25_ptwb_range(pte, PAGE_SIZE);		/* the new (zeroed) table */
 	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
@@ -37,6 +38,7 @@ static inline void pmd_populate(struct mm_struct *mm,
 {
 	unsigned long pfn = virt_to_pfn(page_address(pte));
 
+	a25_ptwb_range(page_address(pte), PAGE_SIZE);
 	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
@@ -166,6 +168,7 @@ static inline pgd_t *pgd_alloc(struct mm_struct *mm)
 		memset(pgd, 0, USER_PTRS_PER_PGD * sizeof(pgd_t));
 		/* Copy kernel mappings */
 		sync_kernel_mappings(pgd);
+		a25_ptwb_range(pgd, PAGE_SIZE);
 	}
 	return pgd;
 }

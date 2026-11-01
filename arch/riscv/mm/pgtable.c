@@ -35,9 +35,13 @@ int ptep_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long address,
 			      pte_t *ptep)
 {
+	int young;
+
 	if (!pte_young(ptep_get(ptep)))
 		return 0;
-	return test_and_clear_bit(_PAGE_ACCESSED_OFFSET, &pte_val(*ptep));
+	young = test_and_clear_bit(_PAGE_ACCESSED_OFFSET, &pte_val(*ptep));
+	a25_ptwb_entry(ptep);
+	return young;
 }
 EXPORT_SYMBOL_GPL(ptep_test_and_clear_young);
 

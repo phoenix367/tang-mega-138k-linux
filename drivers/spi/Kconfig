@@ -446,6 +446,14 @@ config SPI_NXP_FLEXSPI
 	  This controller does not support generic SPI messages and only
 	  supports the high-level SPI memory interface.
 
+config SPI_GOWIN
+	tristate "Gowin AE350 gateware SPI master (microSD)"
+	depends on OF || COMPILE_TEST
+	help
+	  SPI master of the Tang Mega 138K Pro AE350 gateware (sdspi_core):
+	  a buffered, polled controller driving the Dock's microSD slot in
+	  SPI mode under the mmc_spi host.
+
 config SPI_GPIO
 	tristate "GPIO-based bitbanging SPI Master"
 	depends on GPIOLIB || COMPILE_TEST

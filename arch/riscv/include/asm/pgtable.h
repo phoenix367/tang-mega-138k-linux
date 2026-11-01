@@ -113,6 +113,7 @@
 #include <asm/tlbflush.h>
 #include <linux/mm_types.h>
 #include <asm/compat.h>
+#include <asm/a25-ptwb.h>
 
 #define __page_val_to_pfn(_val)  (((_val) & _PAGE_PFN_MASK) >> _PAGE_PFN_SHIFT)
 
@@ -242,6 +243,7 @@ static inline bool pmd_leaf(pmd_t pmd)
 static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
 	WRITE_ONCE(*pmdp, pmd);
+	a25_ptwb_entry(pmdp);
 }
 
 static inline void pmd_clear(pmd_t *pmdp)
@@ -545,6 +547,7 @@ static inline int pte_same(pte_t pte_a, pte_t pte_b)
 static inline void set_pte(pte_t *ptep, pte_t pteval)
 {
 	WRITE_ONCE(*ptep, pteval);
+	a25_ptwb_entry(ptep);
 }
 
 void flush_icache_pte(struct mm_struct *mm, pte_t pte);
@@ -593,6 +596,7 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 {
 	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
 
+	a25_ptwb_entry(ptep);
 	page_table_check_pte_clear(mm, pte);
 
 	return pte;
@@ -603,6 +607,7 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm,
 				      unsigned long address, pte_t *ptep)
 {
 	atomic_long_and(~(unsigned long)_PAGE_WRITE, (atomic_long_t *)ptep);
+	a25_ptwb_entry(ptep);
 }
 
 #define __HAVE_ARCH_PTEP_CLEAR_YOUNG_FLUSH

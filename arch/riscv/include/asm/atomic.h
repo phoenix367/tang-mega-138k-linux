@@ -17,6 +17,7 @@
 #endif
 
 #include <asm/cmpxchg.h>
+#include <asm/soft_atomic.h>
 
 #define __atomic_acquire_fence()					\
 	__asm__ __volatile__(RISCV_ACQUIRE_BARRIER "" ::: "memory")
@@ -54,11 +55,10 @@ static __always_inline void arch_atomic64_set(atomic64_t *v, s64 i)
 static __always_inline							\
 void arch_atomic##prefix##_##op(c_type i, atomic##prefix##_t *v)	\
 {									\
-	__asm__ __volatile__ (						\
-		"	amo" #asm_op "." #asm_type " zero, %1, %0"	\
-		: "+A" (v->counter)					\
-		: "r" (I)						\
-		: "memory");						\
+	unsigned long __sf;						\
+	__soft_atomic_begin(__sf);					\
+	v->counter = __soft_op_##asm_op(v->counter, (I));		\
+	__soft_atomic_end(__sf);					\
 }									\
 
 #ifdef CONFIG_GENERIC_ATOMIC64
@@ -89,24 +89,18 @@ static __always_inline							\
 c_type arch_atomic##prefix##_fetch_##op##_relaxed(c_type i,		\
 					     atomic##prefix##_t *v)	\
 {									\
-	register c_type ret;						\
-	__asm__ __volatile__ (						\
-		"	amo" #asm_op "." #asm_type " %1, %2, %0"	\
-		: "+A" (v->counter), "=r" (ret)				\
-		: "r" (I)						\
-		: "memory");						\
+	c_type ret;							\
+	unsigned long __sf;						\
+	__soft_atomic_begin(__sf);					\
+	ret = v->counter;						\
+	v->counter = __soft_op_##asm_op(ret, (I));			\
+	__soft_atomic_end(__sf);					\
 	return ret;							\
 }									\
 static __always_inline							\
 c_type arch_atomic##prefix##_fetch_##op(c_type i, atomic##prefix##_t *v)	\
 {									\
-	register c_type ret;						\
-	__asm__ __volatile__ (						\
-		"	amo" #asm_op "." #asm_type ".aqrl  %1, %2, %0"	\
-		: "+A" (v->counter), "=r" (ret)				\
-		: "r" (I)						\
-		: "memory");						\
-	return ret;							\
+	return arch_atomic##prefix##_fetch_##op##_relaxed(i, v);	\
 }
 
 #define ATOMIC_OP_RETURN(op, asm_op, c_op, I, asm_type, c_type, prefix)	\
@@ -197,17 +191,13 @@ ATOMIC_OPS(xor, xor, i)
 
 #define _arch_atomic_fetch_add_unless(_prev, _rc, counter, _a, _u, sfx)	\
 ({									\
-	__asm__ __volatile__ (						\
-		"0:	lr." sfx "     %[p],  %[c]\n"			\
-		"	beq	       %[p],  %[u], 1f\n"		\
-		"	add            %[rc], %[p], %[a]\n"		\
-		"	sc." sfx ".rl  %[rc], %[rc], %[c]\n"		\
-		"	bnez           %[rc], 0b\n"			\
-		"	fence          rw, rw\n"			\
-		"1:\n"							\
-		: [p]"=&r" (_prev), [rc]"=&r" (_rc), [c]"+A" (counter)	\
-		: [a]"r" (_a), [u]"r" (_u)				\
-		: "memory");						\
+	unsigned long __sf;						\
+	(void)(_rc);							\
+	__soft_atomic_begin(__sf);					\
+	(_prev) = (counter);						\
+	if ((_prev) != (_u))						\
+		(counter) = (_prev) + (_a);				\
+	__soft_atomic_end(__sf);					\
 })
 
 /* This is required to provide a full barrier on success. */
@@ -236,17 +226,13 @@ static __always_inline s64 arch_atomic64_fetch_add_unless(atomic64_t *v, s64 a, 
 
 #define _arch_atomic_inc_unless_negative(_prev, _rc, counter, sfx)	\
 ({									\
-	__asm__ __volatile__ (						\
-		"0:	lr." sfx "      %[p],  %[c]\n"			\
-		"	bltz            %[p],  1f\n"			\
-		"	addi            %[rc], %[p], 1\n"		\
-		"	sc." sfx ".rl   %[rc], %[rc], %[c]\n"		\
-		"	bnez            %[rc], 0b\n"			\
-		"	fence           rw, rw\n"			\
-		"1:\n"							\
-		: [p]"=&r" (_prev), [rc]"=&r" (_rc), [c]"+A" (counter)	\
-		:							\
-		: "memory");						\
+	unsigned long __sf;						\
+	(void)(_rc);							\
+	__soft_atomic_begin(__sf);					\
+	(_prev) = (counter);						\
+	if ((_prev) >= 0)						\
+		(counter) = (_prev) + 1;				\
+	__soft_atomic_end(__sf);					\
 })
 
 static __always_inline bool arch_atomic_inc_unless_negative(atomic_t *v)
@@ -262,17 +248,13 @@ static __always_inline bool arch_atomic_inc_unless_negative(atomic_t *v)
 
 #define _arch_atomic_dec_unless_positive(_prev, _rc, counter, sfx)	\
 ({									\
-	__asm__ __volatile__ (						\
-		"0:	lr." sfx "      %[p],  %[c]\n"			\
-		"	bgtz            %[p],  1f\n"			\
-		"	addi            %[rc], %[p], -1\n"		\
-		"	sc." sfx ".rl   %[rc], %[rc], %[c]\n"		\
-		"	bnez            %[rc], 0b\n"			\
-		"	fence           rw, rw\n"			\
-		"1:\n"							\
-		: [p]"=&r" (_prev), [rc]"=&r" (_rc), [c]"+A" (counter)	\
-		:							\
-		: "memory");						\
+	unsigned long __sf;						\
+	(void)(_rc);							\
+	__soft_atomic_begin(__sf);					\
+	(_prev) = (counter);						\
+	if ((_prev) <= 0)						\
+		(counter) = (_prev) - 1;				\
+	__soft_atomic_end(__sf);					\
 })
 
 static __always_inline bool arch_atomic_dec_unless_positive(atomic_t *v)
@@ -288,17 +270,13 @@ static __always_inline bool arch_atomic_dec_unless_positive(atomic_t *v)
 
 #define _arch_atomic_dec_if_positive(_prev, _rc, counter, sfx)		\
 ({									\
-	__asm__ __volatile__ (						\
-		"0:	lr." sfx "     %[p],  %[c]\n"			\
-		"	addi           %[rc], %[p], -1\n"		\
-		"	bltz           %[rc], 1f\n"			\
-		"	sc." sfx ".rl  %[rc], %[rc], %[c]\n"		\
-		"	bnez           %[rc], 0b\n"			\
-		"	fence          rw, rw\n"			\
-		"1:\n"							\
-		: [p]"=&r" (_prev), [rc]"=&r" (_rc), [c]"+A" (counter)	\
-		:							\
-		: "memory");						\
+	unsigned long __sf;						\
+	__soft_atomic_begin(__sf);					\
+	(_prev) = (counter);						\
+	(_rc) = (_prev) - 1;						\
+	if ((_rc) >= 0)							\
+		(counter) = (_rc);					\
+	__soft_atomic_end(__sf);					\
 })
 
 static __always_inline int arch_atomic_dec_if_positive(atomic_t *v)

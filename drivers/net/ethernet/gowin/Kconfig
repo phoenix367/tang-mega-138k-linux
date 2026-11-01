@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Gowin network device configuration
+
+config NET_VENDOR_GOWIN
+	bool "Gowin devices"
+	default y
+	depends on OF
+	help
+	  If you have a network (Ethernet) device belonging to this class,
+	  say Y.
+
+	  Note that the answer to this question doesn't directly affect the
+	  kernel: saying N will just cause the configurator to skip all the
+	  questions about Gowin devices. If you say Y, you will be asked for
+	  your specific device in the following questions.
+
+if NET_VENDOR_GOWIN
+
+config GOWIN_TSE
+	tristate "Gowin Triple-Speed Ethernet (PIO) support"
+	depends on OF && HAS_IOMEM
+	select PHYLIB
+	help
+	  Driver for the Gowin Triple-Speed Ethernet MAC as integrated on the
+	  AE350 SoC (Tang Mega 138K Pro Dock). The MAC uses a programmed-I/O
+	  frame window (no DMA descriptors). To compile as a module choose M.
+
+endif # NET_VENDOR_GOWIN

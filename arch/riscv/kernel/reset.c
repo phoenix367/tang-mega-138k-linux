@@ -5,9 +5,18 @@
 
 #include <linux/reboot.h>
 #include <linux/pm.h>
+#include <linux/irqflags.h>
 
 static void default_power_off(void)
 {
+	/*
+	 * Final halt (e.g. `halt`, or poweroff when SBI SRST is unavailable).
+	 * Disable interrupts first: a wfi loop with interrupts enabled keeps
+	 * waking for timer ticks while the scheduler/watchdog can't run, which
+	 * trips the soft-lockup detector. With interrupts off the hart parks
+	 * silently. (Single-hart: nothing else needs servicing.)
+	 */
+	local_irq_disable();
 	while (1)
 		wait_for_interrupt();
 }

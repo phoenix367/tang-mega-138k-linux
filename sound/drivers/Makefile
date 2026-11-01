@@ -5,6 +5,7 @@
 #
 
 snd-dummy-y := dummy.o
+snd-gowin-pt8211-y := gowin-pt8211.o
 snd-aloop-y := aloop.o
 snd-mtpav-y := mtpav.o
 snd-mts64-y := mts64.o
@@ -16,6 +17,7 @@ snd-virmidi-y := virmidi.o
 
 # Toplevel Module Dependency
 obj-$(CONFIG_SND_DUMMY) += snd-dummy.o
+obj-$(CONFIG_SND_GOWIN_PT8211) += snd-gowin-pt8211.o
 obj-$(CONFIG_SND_ALOOP) += snd-aloop.o
 obj-$(CONFIG_SND_VIRMIDI) += snd-virmidi.o
 obj-$(CONFIG_SND_PCMTEST) += snd-pcmtest.o

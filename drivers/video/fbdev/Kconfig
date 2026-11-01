@@ -1773,6 +1773,16 @@ config FB_HYPERV
 	help
 	  This framebuffer driver supports Microsoft Hyper-V Synthetic Video.
 
+config FB_GOWIN_LCD
+	tristate "Gowin AE350 LCD framebuffer (Tang Mega 138K Pro)"
+	depends on FB && OF
+	select FB_SYSMEM_HELPERS_DEFERRED
+	help
+	  Framebuffer for the RGB565 scan-out video core in the Tang Mega
+	  138K Pro AE350 gateware (Sipeed 5" 800x480 RGB panel).  Rendering
+	  is done in software; the driver writes changed framebuffer bytes
+	  back from the CPU cache for the scan-out DMA.
+
 config FB_SIMPLE
 	tristate "Simple framebuffer support"
 	depends on FB

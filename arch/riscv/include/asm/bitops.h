@@ -14,6 +14,7 @@
 #include <linux/irqflags.h>
 #include <asm/barrier.h>
 #include <asm/bitsperlong.h>
+#include <asm/soft_atomic.h>
 
 #if !defined(CONFIG_RISCV_ISA_ZBB) || defined(NO_ALTERNATIVE)
 #include <asm-generic/bitops/__ffs.h>
@@ -193,24 +194,26 @@ legacy:
 #error "Unexpected BITS_PER_LONG"
 #endif
 
+/* Gowin AE350 single-hart soft atomics (no hardware atomics). See soft_atomic.h. */
 #define __test_and_op_bit_ord(op, mod, nr, addr, ord)		\
 ({								\
-	unsigned long __res, __mask;				\
+	unsigned long __res, __mask, __sf;			\
 	__mask = BIT_MASK(nr);					\
-	__asm__ __volatile__ (					\
-		__AMO(op) #ord " %0, %2, %1"			\
-		: "=r" (__res), "+A" (addr[BIT_WORD(nr)])	\
-		: "r" (mod(__mask))				\
-		: "memory");					\
+	__soft_atomic_begin(__sf);				\
+	__res = addr[BIT_WORD(nr)];				\
+	addr[BIT_WORD(nr)] = __soft_op_##op(__res, mod(__mask));	\
+	__soft_atomic_end(__sf);				\
 	((__res & __mask) != 0);				\
 })
 
 #define __op_bit_ord(op, mod, nr, addr, ord)			\
-	__asm__ __volatile__ (					\
-		__AMO(op) #ord " zero, %1, %0"			\
-		: "+A" (addr[BIT_WORD(nr)])			\
-		: "r" (mod(BIT_MASK(nr)))			\
-		: "memory");
+do {								\
+	unsigned long __sf;					\
+	__soft_atomic_begin(__sf);				\
+	addr[BIT_WORD(nr)] =					\
+		__soft_op_##op(addr[BIT_WORD(nr)], mod(BIT_MASK(nr)));	\
+	__soft_atomic_end(__sf);				\
+} while (0)
 
 #define __test_and_op_bit(op, mod, nr, addr) 			\
 	__test_and_op_bit_ord(op, mod, nr, addr, .aqrl)
@@ -354,12 +357,11 @@ static inline void arch___clear_bit_unlock(
 static inline bool arch_xor_unlock_is_negative_byte(unsigned long mask,
 		volatile unsigned long *addr)
 {
-	unsigned long res;
-	__asm__ __volatile__ (
-		__AMO(xor) ".rl %0, %2, %1"
-		: "=r" (res), "+A" (*addr)
-		: "r" (__NOP(mask))
-		: "memory");
+	unsigned long res, __sf;
+	__soft_atomic_begin(__sf);
+	res = *addr;
+	*addr = res ^ mask;
+	__soft_atomic_end(__sf);
 	return (res & BIT(7)) != 0;
 }
 

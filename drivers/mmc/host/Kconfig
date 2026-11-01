@@ -637,6 +637,14 @@ config MMC_DAVINCI
 	  If you have an DAVINCI board with a Multimedia Card slot,
 	  say Y or M here.  If unsure, say N.
 
+config MMC_GOWIN_SDHOST
+	tristate "Gowin AE350 gateware SD host (native 4-bit, DMA)"
+	depends on OF || COMPILE_TEST
+	help
+	  SD host of the Tang Mega 138K Pro AE350 gateware (sdhost_core): native
+	  1/4-bit SD bus with hardware CRC and a DMA master into DDR, for the
+	  Dock's microSD slot.
+
 config MMC_SPI
 	tristate "MMC/SD/SDIO over SPI"
 	depends on SPI_MASTER

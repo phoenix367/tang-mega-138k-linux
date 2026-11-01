@@ -664,6 +664,28 @@ config SENSORS_GSC
 	  To compile this driver as a module, choose M here:
 	  the module will be called gsc-hwmon.
 
+config SENSORS_GOWIN_ADC
+	tristate "Gowin AE350 FPGA on-die temperature/voltage monitor"
+	depends on OF || COMPILE_TEST
+	help
+	  Support for the sensor core of the Tang Mega 138K Pro AE350 gateware:
+	  the FPGA's hard ADC blocks reading the die temperature and the supply
+	  rails, scanned continuously by the core.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called gowin-adc.
+
+config SENSORS_GOWIN_FAN
+	tristate "Gowin AE350 FPGA fan PWM/tachometer"
+	depends on OF || COMPILE_TEST
+	help
+	  Support for the fan core of the Tang Mega 138K Pro AE350 gateware:
+	  PWM speed control and tachometer readout of the Dock's 4-pin fan
+	  header (pwm1, fan1_input).
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called gowin-fan.
+
 config SENSORS_MC13783_ADC
         tristate "Freescale MC13783/MC13892 ADC"
         depends on MFD_MC13XXX
