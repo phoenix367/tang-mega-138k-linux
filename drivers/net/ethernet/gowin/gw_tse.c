@@ -478,7 +478,13 @@ static int gtse_probe(struct platform_device *pdev)
 	if (p->irq < 0)
 		return p->irq;
 
-	if (of_get_ethdev_address(dev->of_node, ndev))
+	/* DT mac-address / nvmem cell (the board EEPROM); the EEPROM sits on a
+	 * bit-banged bus that probes later than we do, so wait for it rather
+	 * than falling back to a random address. */
+	ret = of_get_ethdev_address(dev->of_node, ndev);
+	if (ret == -EPROBE_DEFER)
+		return ret;
+	if (ret)
 		eth_hw_addr_random(ndev);
 
 	ndev->netdev_ops = &gtse_netdev_ops;
