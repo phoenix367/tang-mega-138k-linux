@@ -628,4 +628,13 @@ source "drivers/misc/uacce/Kconfig"
 source "drivers/misc/pvpanic/Kconfig"
 source "drivers/misc/mchp_pci1xxxx/Kconfig"
 source "drivers/misc/keba/Kconfig"
+config GOWIN_IDCT
+	tristate "Gowin AE350 hardware IDCT core (Tang Mega 138K Pro)"
+	depends on OF
+	help
+	  Misc device for the 8x8 inverse DCT / frame assembly core in the
+	  Tang Mega 138K Pro AE350 gateware: coefficient records in a DRAM
+	  ring, pixels written into YUV 4:2:0 planes by the core.  Used by the
+	  board's MJPEG player.
+
 endmenu
