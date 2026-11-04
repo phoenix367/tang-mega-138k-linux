@@ -23,6 +23,12 @@
  * GOWIN_LCD_IOC_YUV_SHOW writes one back and points the core at it; the
  * core latches the new planes at the next frame boundary, so flips never
  * tear.  GOWIN_LCD_IOC_RGB, or closing the file, restores the RGB565 screen.
+ *
+ * Gateware Build 71+ adds a nearest-neighbour scaler (the picture in a window
+ * of the panel) and an ARGB8888 OSD layer.  GOWIN_LCD_IOC_SCALE programs the
+ * window and the 16.16 steps; the OSD comes from `osd_buffers` panel-sized
+ * ARGB8888 buffers mmap()ed after the YUV buffers (cached, written back by
+ * GOWIN_LCD_IOC_OSD).  Returning to RGB turns both off.
  */
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -33,6 +39,7 @@
 #include <linux/dma-map-ops.h>
 #include <linux/gfp.h>
 #include <linux/uaccess.h>
+#include <linux/math64.h>
 #include <linux/gowin-lcdfb.h>
 
 /* ---- video core registers (video/rtl/video_csr.v) ---- */
@@ -51,10 +58,35 @@
 #define LCD_FB_BASE_U	0x30	/* YUV mode (Build 68+): U and V planes, chroma stride */
 #define LCD_FB_BASE_V	0x34
 #define LCD_STRIDE_C	0x38
+#define LCD_SRC_SIZE	0x3c	/* scaler / OSD (Build 71+) */
+#define LCD_DST_POS	0x40
+#define LCD_DST_SIZE	0x44
+#define LCD_STEP_X	0x48
+#define LCD_STEP_Y	0x4c
+#define LCD_BG		0x50
+#define LCD_OSD_BASE	0x54
+#define LCD_OSD_STRIDE	0x58
+#define LCD_OSD_POS	0x5c
+#define LCD_OSD_SIZE	0x60
+#define LCD_CAPS	0x64	/* [0] YUV [1] scaler [2] OSD; 0 on older cores */
 
 #define CTRL_ENABLE	BIT(0)
 #define CTRL_YUV	BIT(2)	/* planar YUV 4:2:0 framebuffer */
 #define CTRL_FULL	BIT(3)	/* full-range (JPEG) YUV */
+#define CTRL_SCALE	BIT(4)	/* scaler window */
+#define CTRL_OSD	BIT(5)	/* OSD layer */
+
+/* YUV buffers hold sources up to this size for the scaler (Build 71+), whatever the panel */
+static unsigned int yuv_max_w = 1024, yuv_max_h = 768;
+module_param(yuv_max_w, uint, 0444);
+MODULE_PARM_DESC(yuv_max_w, "widest YUV 4:2:0 source a scan-out buffer holds (default 1024)");
+module_param(yuv_max_h, uint, 0444);
+MODULE_PARM_DESC(yuv_max_h, "tallest YUV 4:2:0 source a scan-out buffer holds (default 768)");
+
+#define GOWIN_LCD_MAX_OSD	4
+static unsigned int osd_buffers = 2;
+module_param(osd_buffers, uint, 0444);
+MODULE_PARM_DESC(osd_buffers, "panel-sized ARGB8888 OSD buffers to allocate (0..4, default 2)");
 
 #define GOWIN_LCD_MAX_YUV	8
 static unsigned int yuv_buffers = 6;	/* enough for an H.264 reference set + display */
@@ -78,7 +110,23 @@ struct gowin_lcdfb {
 	void *yuv[GOWIN_LCD_MAX_YUV];
 	dma_addr_t yuv_dma[GOWIN_LCD_MAX_YUV];
 	bool yuv_on;			/* the core is scanning a YUV buffer */
+	/* scaler / OSD */
+	u32 caps;			/* GOWIN_LCD_CAP_* */
+	u32 ctrl;			/* CTRL mode bits (enable, YUV, range) */
+	u32 ctrl_x;			/* CTRL_SCALE / CTRL_OSD */
+	u32 src_h;			/* the scaler's source height while it is on */
+	unsigned int nosd;
+	size_t osd_size;
+	u32 osd_stride;
+	void *osd[GOWIN_LCD_MAX_OSD];
+	dma_addr_t osd_dma[GOWIN_LCD_MAX_OSD];
 };
+
+static void gowin_lcdfb_ctrl(struct gowin_lcdfb *p, u32 mode)
+{
+	p->ctrl = mode;
+	writel(p->ctrl | p->ctrl_x, p->base + LCD_CTRL);
+}
 
 /* write back [off, off + len) of the framebuffer for the scan-out */
 static void gowin_lcdfb_flush(struct fb_info *info, unsigned long off, size_t len)
@@ -122,13 +170,72 @@ static void gowin_lcdfb_rgb(struct gowin_lcdfb *p)
 {
 	writel(p->fb_dma, p->base + LCD_FB_BASE);
 	writel(p->stride, p->base + LCD_STRIDE);
-	writel(CTRL_ENABLE, p->base + LCD_CTRL);
+	p->ctrl_x = 0;				/* the desktop: 1:1, no OSD */
+	gowin_lcdfb_ctrl(p, CTRL_ENABLE);
 	p->yuv_on = false;
+}
+
+/* the picture in a window of the panel (or 1:1 again) */
+static int gowin_lcdfb_scale(struct gowin_lcdfb *p, const struct gowin_lcd_scale *sc)
+{
+	u64 sx, sy;
+
+	if (!(p->caps & GOWIN_LCD_CAP_SCALE))
+		return -EOPNOTSUPP;
+	if (!(sc->flags & GOWIN_LCD_SCALE_ON)) {
+		p->ctrl_x &= ~CTRL_SCALE;
+		p->src_h = 0;
+		gowin_lcdfb_ctrl(p, p->ctrl);
+		return 0;
+	}
+	if (!sc->src_w || sc->src_w > 2048 || !sc->src_h || sc->src_h > 4095 ||
+	    !sc->dst_w || !sc->dst_h || sc->dst_x + sc->dst_w > p->width || sc->dst_y + sc->dst_h > p->height)
+		return -EINVAL;
+	sx = div_u64((u64)sc->src_w << 16, sc->dst_w);
+	sy = div_u64((u64)sc->src_h << 16, sc->dst_h);
+	if (sx > 0x3fffff || sy > 0x3fffff)		/* 22-bit steps: < 64x down */
+		return -EINVAL;
+	writel(sc->src_h << 16 | sc->src_w, p->base + LCD_SRC_SIZE);
+	writel(sc->dst_y << 16 | sc->dst_x, p->base + LCD_DST_POS);
+	writel(sc->dst_h << 16 | sc->dst_w, p->base + LCD_DST_SIZE);
+	writel(sx, p->base + LCD_STEP_X);
+	writel(sy, p->base + LCD_STEP_Y);
+	writel(sc->bg & 0xffff, p->base + LCD_BG);
+	p->ctrl_x |= CTRL_SCALE;
+	p->src_h = sc->src_h;
+	gowin_lcdfb_ctrl(p, p->ctrl);
+	return 0;
+}
+
+/* show (or hide) an OSD buffer */
+static int gowin_lcdfb_osd(struct gowin_lcdfb *p, const struct gowin_lcd_osd *o)
+{
+	if (!(p->caps & GOWIN_LCD_CAP_OSD) || !p->nosd)
+		return -EOPNOTSUPP;
+	if (!(o->flags & GOWIN_LCD_OSD_ON)) {
+		p->ctrl_x &= ~CTRL_OSD;
+		gowin_lcdfb_ctrl(p, p->ctrl);
+		return 0;
+	}
+	if (o->buf >= p->nosd || !o->w || !o->h || o->x + o->w > p->width || o->y + o->h > p->height)
+		return -EINVAL;
+	/* the CPU drew through its cache; the core reads DRAM */
+	if (!(o->flags & GOWIN_LCD_OSD_NOSYNC))
+		dma_sync_single_range_for_device(p->dev, p->osd_dma[o->buf], 0,
+						 (size_t)o->h * p->osd_stride, DMA_TO_DEVICE);
+	writel(p->osd_dma[o->buf], p->base + LCD_OSD_BASE);
+	writel(p->osd_stride, p->base + LCD_OSD_STRIDE);
+	writel(o->y << 16 | o->x, p->base + LCD_OSD_POS);
+	writel(o->h << 16 | o->w, p->base + LCD_OSD_SIZE);
+	p->ctrl_x |= CTRL_OSD;
+	gowin_lcdfb_ctrl(p, p->ctrl);
+	return 0;
 }
 
 static int gowin_lcdfb_yuv_show(struct gowin_lcdfb *p, const struct gowin_lcd_yuv_show *sh)
 {
-	u32 ch = p->height / 2;
+	/* the planes must hold every line the core will fetch */
+	u32 lines = max(p->height, (p->ctrl_x & CTRL_SCALE) ? p->src_h : 0), ch = (lines + 1) / 2;
 	dma_addr_t b;
 
 	if (!p->nyuv || sh->buf >= p->nyuv)
@@ -136,7 +243,7 @@ static int gowin_lcdfb_yuv_show(struct gowin_lcdfb *p, const struct gowin_lcd_yu
 	if ((sh->y_off | sh->u_off | sh->v_off | sh->y_stride | sh->c_stride) & 31)
 		return -EINVAL;
 	if (!sh->y_stride || !sh->c_stride ||
-	    sh->y_off + (size_t)sh->y_stride * p->height > p->yuv_size ||
+	    sh->y_off + (size_t)sh->y_stride * lines > p->yuv_size ||
 	    sh->u_off + (size_t)sh->c_stride * ch > p->yuv_size ||
 	    sh->v_off + (size_t)sh->c_stride * ch > p->yuv_size)
 		return -EINVAL;
@@ -149,8 +256,7 @@ static int gowin_lcdfb_yuv_show(struct gowin_lcdfb *p, const struct gowin_lcd_yu
 	writel(b + sh->v_off, p->base + LCD_FB_BASE_V);
 	writel(sh->y_stride, p->base + LCD_STRIDE);
 	writel(sh->c_stride, p->base + LCD_STRIDE_C);
-	writel(CTRL_ENABLE | CTRL_YUV | ((sh->flags & GOWIN_LCD_YUV_FULL_RANGE) ? CTRL_FULL : 0),
-	       p->base + LCD_CTRL);
+	gowin_lcdfb_ctrl(p, CTRL_ENABLE | CTRL_YUV | ((sh->flags & GOWIN_LCD_YUV_FULL_RANGE) ? CTRL_FULL : 0));
 	p->yuv_on = true;
 	return 0;
 }
@@ -201,12 +307,34 @@ static int gowin_lcdfb_ioctl(struct fb_info *info, unsigned int cmd, unsigned lo
 
 		return put_user(f, (u32 __user *)up);
 	}
+	case GOWIN_LCD_IOC_CAPS: {
+		struct gowin_lcd_caps c = {
+			.caps = p->caps, .osd_nbuf = p->nosd, .osd_stride = p->osd_stride,
+			.osd_buf_size = p->osd_size, .osd_mmap_off = p->size + p->nyuv * p->yuv_size,
+			.max_src_w = (p->caps & GOWIN_LCD_CAP_SCALE) ? 2048 : p->width,
+		};
+		return copy_to_user(up, &c, sizeof(c)) ? -EFAULT : 0;
+	}
+	case GOWIN_LCD_IOC_SCALE: {
+		struct gowin_lcd_scale sc;
+
+		if (copy_from_user(&sc, up, sizeof(sc)))
+			return -EFAULT;
+		return gowin_lcdfb_scale(p, &sc);
+	}
+	case GOWIN_LCD_IOC_OSD: {
+		struct gowin_lcd_osd o;
+
+		if (copy_from_user(&o, up, sizeof(o)))
+			return -EFAULT;
+		return gowin_lcdfb_osd(p, &o);
+	}
 	default:
 		return -ENOTTY;
 	}
 }
 
-/* the RGB framebuffer through deferred I/O; a YUV buffer as plain cached pages */
+/* the RGB framebuffer through deferred I/O; YUV and OSD buffers as plain cached pages */
 static int gowin_lcdfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	struct gowin_lcdfb *p = info->par;
@@ -220,13 +348,25 @@ static int gowin_lcdfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 		return fb_deferred_io_mmap(info, vma);
 	}
 	off -= p->size;
-	i = off / p->yuv_size;
-	off -= i * p->yuv_size;
-	if (i >= p->nyuv || off + len > p->yuv_size)
+	if (off < p->nyuv * p->yuv_size) {
+		i = off / p->yuv_size;
+		off -= i * p->yuv_size;
+		if (off + len > p->yuv_size)
+			return -EINVAL;
+		vma->vm_pgoff = 0;
+		return remap_pfn_range(vma, vma->vm_start,
+				       page_to_pfn(virt_to_page(p->yuv[i] + off)), len, vma->vm_page_prot);
+	}
+	off -= p->nyuv * p->yuv_size;
+	if (!p->osd_size)
+		return -EINVAL;
+	i = off / p->osd_size;
+	off -= i * p->osd_size;
+	if (i >= p->nosd || off + len > p->osd_size)
 		return -EINVAL;
 	vma->vm_pgoff = 0;
 	return remap_pfn_range(vma, vma->vm_start,
-			       page_to_pfn(virt_to_page(p->yuv[i] + off)), len, vma->vm_page_prot);
+			       page_to_pfn(virt_to_page(p->osd[i] + off)), len, vma->vm_page_prot);
 }
 
 /* a player that dies (or just exits) must not leave its last frame on the panel */
@@ -234,7 +374,7 @@ static int gowin_lcdfb_release(struct fb_info *info, int user)
 {
 	struct gowin_lcdfb *p = info->par;
 
-	if (user && p->yuv_on)
+	if (user && (p->yuv_on || p->ctrl_x))
 		gowin_lcdfb_rgb(p);
 	return 0;
 }
@@ -248,6 +388,43 @@ static void gowin_lcdfb_yuv_free(struct gowin_lcdfb *p)
 		free_pages_exact(p->yuv[i], p->yuv_size);
 	}
 	p->nyuv = 0;
+}
+
+/* OSD buffers (Build 71+): panel-sized ARGB8888, transparent */
+static void gowin_lcdfb_osd_init(struct gowin_lcdfb *p)
+{
+	unsigned int n = min(osd_buffers, (unsigned int)GOWIN_LCD_MAX_OSD), i;
+	u8 *buf;
+
+	if (!(p->caps & GOWIN_LCD_CAP_OSD) || !n)
+		return;
+	p->osd_stride = ALIGN(p->width * 4, 32);
+	p->osd_size = PAGE_ALIGN(p->osd_stride * p->height);
+	for (i = 0; i < n; i++) {
+		buf = alloc_pages_exact(p->osd_size, GFP_KERNEL | __GFP_ZERO);
+		if (!buf)
+			break;
+		p->osd_dma[i] = dma_map_single(p->dev, buf, p->osd_size, DMA_TO_DEVICE);
+		if (dma_mapping_error(p->dev, p->osd_dma[i])) {
+			free_pages_exact(buf, p->osd_size);
+			break;
+		}
+		p->osd[i] = buf;
+		p->nosd = i + 1;
+	}
+	dev_info(p->dev, "scaler%s, %u ARGB8888 OSD buffers of %zu KB\n",
+		 (p->caps & GOWIN_LCD_CAP_SCALE) ? "" : " absent", p->nosd, p->osd_size / 1024);
+}
+
+static void gowin_lcdfb_osd_free(struct gowin_lcdfb *p)
+{
+	unsigned int i;
+
+	for (i = 0; i < p->nosd; i++) {
+		dma_unmap_single(p->dev, p->osd_dma[i], p->osd_size, DMA_TO_DEVICE);
+		free_pages_exact(p->osd[i], p->osd_size);
+	}
+	p->nosd = 0;
 }
 
 /* allocate the YUV buffers if the core has the mode (its U-base register exists) */
@@ -267,6 +444,11 @@ static void gowin_lcdfb_yuv_init(struct gowin_lcdfb *p)
 	p->u_off = p->y_stride * p->height;
 	p->v_off = p->u_off + p->c_stride * (p->height / 2);
 	p->yuv_size = PAGE_ALIGN(p->v_off + p->c_stride * (p->height / 2));
+	/* room for a larger source the scaler shrinks to the panel (own layout per stream) */
+	if (readl(p->base + LCD_CAPS) & GOWIN_LCD_CAP_SCALE)
+		p->yuv_size = max_t(size_t, p->yuv_size,
+				    PAGE_ALIGN(ALIGN(yuv_max_w, 32) * yuv_max_h +
+					       2 * ALIGN(yuv_max_w / 2, 32) * ((yuv_max_h + 1) / 2)));
 	for (i = 0; i < n; i++) {
 		buf = alloc_pages_exact(p->yuv_size, GFP_KERNEL);
 		if (!buf)
@@ -417,9 +599,12 @@ static int gowin_lcdfb_probe(struct platform_device *pdev)
 	writel(hbp, base + LCD_HSTART);
 	writel(((vbp + height + vfp) << 16) | height, base + LCD_VTIM);
 	writel(vbp, base + LCD_VSTART);
-	writel(CTRL_ENABLE, base + LCD_CTRL);
+	gowin_lcdfb_ctrl(p, CTRL_ENABLE);
 
 	gowin_lcdfb_yuv_init(p);
+	p->caps = (readl(base + LCD_CAPS) & (GOWIN_LCD_CAP_SCALE | GOWIN_LCD_CAP_OSD)) |
+		  (p->nyuv ? GOWIN_LCD_CAP_YUV : 0);
+	gowin_lcdfb_osd_init(p);
 
 	ret = register_framebuffer(info);
 	if (ret)
@@ -431,6 +616,7 @@ static int gowin_lcdfb_probe(struct platform_device *pdev)
 
 err_stop:
 	writel(0, base + LCD_CTRL);
+	gowin_lcdfb_osd_free(p);
 	gowin_lcdfb_yuv_free(p);
 	fb_deferred_io_cleanup(info);
 err_unmap:
@@ -449,6 +635,7 @@ static void gowin_lcdfb_remove(struct platform_device *pdev)
 
 	unregister_framebuffer(info);
 	writel(0, p->base + LCD_CTRL);
+	gowin_lcdfb_osd_free(p);
 	gowin_lcdfb_yuv_free(p);
 	fb_deferred_io_cleanup(info);
 	dma_unmap_single(p->dev, p->fb_dma, p->size, DMA_TO_DEVICE);
