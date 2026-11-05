@@ -36,6 +36,7 @@
 #define   ST_DONE		BIT(1)
 #define   ST_BAND		BIT(2)
 #define   ST_BAD		BIT(3)
+#define   ST_WIDE		BIT(9)	/* frames up to 2048 wide (older cores: 1024) */
 #define REG_RING_BASE	0x08
 #define REG_RING_MASK	0x0c
 #define REG_TAIL	0x10
@@ -49,7 +50,6 @@
 #define REG_BANDS	0x30
 #define REG_ID		0x34
 #define ID_IDCT		0x49444354
-#define MAX_WIDTH	1024
 
 static unsigned int ring_kb = 2048;
 module_param(ring_kb, uint, 0444);
@@ -69,6 +69,7 @@ struct gowin_idct {
 	bool open;
 	wait_queue_head_t wq;
 	u32 irqs;
+	u32 max_width;			/* luma pixels a band line holds */
 };
 
 static inline u32 rd(struct gowin_idct *p, u32 r) { return readl(p->base + r); }
@@ -158,7 +159,7 @@ static long gowin_idct_ioctl(struct file *file, unsigned int cmd, unsigned long 
 	switch (cmd) {
 	case GOWIN_IDCT_IOC_INFO: {
 		struct gowin_idct_info info = {
-			.ring_size = p->ring_size, .id = rd(p, REG_ID), .max_width = MAX_WIDTH,
+			.ring_size = p->ring_size, .id = rd(p, REG_ID), .max_width = p->max_width,
 			.reserved = p->ring_used,
 		};
 		ret = copy_to_user(up, &info, sizeof(info)) ? -EFAULT : 0;
@@ -173,7 +174,7 @@ static long gowin_idct_ioctl(struct file *file, unsigned int cmd, unsigned long 
 		}
 		if ((s.y_base | s.u_base | s.v_base | s.y_stride | s.c_stride) & 7 ||
 		    !s.y_stride || !s.c_stride || !s.width || !s.height ||
-		    s.width & 15 || s.width > MAX_WIDTH || s.height > 4095 ||
+		    s.width & 15 || s.width > p->max_width || s.height > 4095 ||
 		    s.y_stride < s.width || s.c_stride < s.width / 2) {
 			ret = -EINVAL;
 			break;
@@ -327,6 +328,7 @@ static int gowin_idct_probe(struct platform_device *pdev)
 
 	wr(p, REG_CTRL, CTRL_RESET);
 	wr(p, REG_STATUS, ST_DONE | ST_BAND | ST_BAD);
+	p->max_width = (rd(p, REG_STATUS) & ST_WIDE) ? 2048 : 1024;
 	ret = devm_request_irq(dev, p->irq, gowin_idct_irq, 0, dev_name(dev), p);
 	if (ret)
 		goto err_ring;
@@ -339,7 +341,8 @@ static int gowin_idct_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_ring;
 	platform_set_drvdata(pdev, p);
-	dev_info(dev, "IDCT core, %zu KB record ring, irq %d\n", p->ring_size / 1024, p->irq);
+	dev_info(dev, "IDCT core, frames up to %u wide, %zu KB record ring, irq %d\n",
+		 p->max_width, p->ring_size / 1024, p->irq);
 	return 0;
 
 err_ring:

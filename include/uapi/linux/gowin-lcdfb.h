@@ -62,8 +62,8 @@ struct gowin_lcd_yuv_dma {
  * pixel (0, 0) lands at (x, y).  Both apply from the next frame; GOWIN_LCD_IOC_RGB
  * and closing the file turn both off.  With the scaler the YUV buffers hold sources
  * larger than the panel (buf_size; module parameters yuv_max_w / yuv_max_h, default
- * 1024 x 768): the caller lays the planes out itself and passes them to YUV_SHOW,
- * which then checks them for the scaler's source height.
+ * 1280 x 768, 1024 x 768 before kernel #93): the caller lays the planes out itself
+ * and passes them to YUV_SHOW, which then checks them for the scaler's source height.
  */
 #define GOWIN_LCD_CAP_YUV		0x1
 #define GOWIN_LCD_CAP_SCALE		0x2

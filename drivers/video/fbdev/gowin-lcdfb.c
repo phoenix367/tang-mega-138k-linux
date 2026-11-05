@@ -77,9 +77,9 @@
 #define CTRL_OSD	BIT(5)	/* OSD layer */
 
 /* YUV buffers hold sources up to this size for the scaler (Build 71+), whatever the panel */
-static unsigned int yuv_max_w = 1024, yuv_max_h = 768;
+static unsigned int yuv_max_w = 1280, yuv_max_h = 768;
 module_param(yuv_max_w, uint, 0444);
-MODULE_PARM_DESC(yuv_max_w, "widest YUV 4:2:0 source a scan-out buffer holds (default 1024)");
+MODULE_PARM_DESC(yuv_max_w, "widest YUV 4:2:0 source a scan-out buffer holds (default 1280: 720p)");
 module_param(yuv_max_h, uint, 0444);
 MODULE_PARM_DESC(yuv_max_h, "tallest YUV 4:2:0 source a scan-out buffer holds (default 768)");
 
