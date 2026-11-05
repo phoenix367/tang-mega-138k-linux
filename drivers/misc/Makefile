@@ -72,4 +72,5 @@ obj-$(CONFIG_TPS6594_PFSM)	+= tps6594-pfsm.o
 obj-$(CONFIG_NSM)		+= nsm.o
 obj-$(CONFIG_MARVELL_CN10K_DPI)	+= mrvl_cn10k_dpi.o
 obj-$(CONFIG_GOWIN_IDCT)	+= gowin-idct.o
+obj-$(CONFIG_GOWIN_DDR_PERF)	+= gowin-ddr-perf.o
 obj-y				+= keba/

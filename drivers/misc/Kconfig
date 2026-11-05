@@ -637,4 +637,13 @@ config GOWIN_IDCT
 	  ring, pixels written into YUV 4:2:0 planes by the core.  Used by the
 	  board's MJPEG player.
 
+config GOWIN_DDR_PERF
+	tristate "Gowin AE350 DDR bus performance counters (Tang Mega 138K Pro)"
+	depends on OF
+	help
+	  sysfs counters of the ddr_perf block in the Tang Mega 138K Pro AE350
+	  gateware: transfers, beats and wait states of the SoC's data-memory
+	  bus and the DDR3 bridge's own statistics, sampled into 64-bit totals,
+	  and the block's bus transfer trace.
+
 endmenu
