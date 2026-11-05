@@ -92,6 +92,50 @@ static inline bool switch_to_should_flush_icache(struct task_struct *task)
 #define __set_prev_cpu(thread)
 #endif
 
+#ifdef CONFIG_RISCV_ISA_VENDOR_EXT_ANDES
+#include <asm/vendor_extensions.h>
+#include <asm/vendor_extensions/andes.h>
+#include <asm/vendorid_list.h>
+
+/*
+ * The user CSRs of the Andes extensions /proc/cpuinfo advertises belong to the
+ * task, like the FPU registers: without this, a process saw another's DSP
+ * overflow flag or exec.it table (src/apps/tests/ucsr_test: 31-86 % of reads).
+ */
+static __always_inline bool andes_has_uitb(void)
+{
+	return riscv_has_vendor_extension_unlikely(ANDES_VENDOR_ID, RISCV_ISA_VENDOR_EXT_XANDESCODENSE);
+}
+
+static inline void andes_ustate_save(struct task_struct *t)
+{
+	if (riscv_andes_dsp)
+		t->thread.andes_ucode = csr_read(CSR_ANDES_UCODE);
+	if (andes_has_uitb())
+		t->thread.andes_uitb = csr_read(CSR_ANDES_UITB);
+}
+
+static inline void andes_ustate_restore(struct task_struct *t)
+{
+	if (riscv_andes_dsp)
+		csr_write(CSR_ANDES_UCODE, t->thread.andes_ucode);
+	if (andes_has_uitb())
+		csr_write(CSR_ANDES_UITB, t->thread.andes_uitb);
+}
+
+/* exec: a new program starts with a clear flag and no exec.it table */
+static inline void andes_ustate_reset(struct task_struct *t)
+{
+	t->thread.andes_ucode = 0;
+	t->thread.andes_uitb = 0;
+	andes_ustate_restore(t);
+}
+#else
+static inline void andes_ustate_save(struct task_struct *t) { }
+static inline void andes_ustate_restore(struct task_struct *t) { }
+static inline void andes_ustate_reset(struct task_struct *t) { }
+#endif
+
 #define switch_to(prev, next, last)			\
 do {							\
 	struct task_struct *__prev = (prev);		\
@@ -101,6 +145,8 @@ do {							\
 		__switch_to_fpu(__prev, __next);	\
 	if (has_vector())					\
 		__switch_to_vector(__prev, __next);	\
+	andes_ustate_save(__prev);			\
+	andes_ustate_restore(__next);			\
 	if (switch_to_should_flush_icache(__next))	\
 		local_flush_icache_all();		\
 	((last) = __switch_to(__prev, __next));		\

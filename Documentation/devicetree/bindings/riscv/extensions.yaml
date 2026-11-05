@@ -109,6 +109,12 @@ properties:
             The standard C extension for compressed instructions, as ratified in
             the 20191213 version of the unprivileged ISA specification.
 
+        - const: p
+          description:
+            The P extension for packed-SIMD / DSP instructions, not ratified. The
+            Andes A25 implements draft v0.5 (major opcode 0x7f, Andes GCC
+            -mext-dsp); firmware adds it when the core's mmsc_cfg.EDSP is set.
+
         - const: v
           description:
             The standard V extension for vector operations, as ratified
@@ -569,6 +575,17 @@ properties:
             and privilege mode filtering. For more details, see Counter Related
             Registers in the AX45MP datasheet.
             https://www.andestech.com/wp-content/uploads/AX45MP-1C-Rev.-5.0.0-Datasheet.pdf
+
+        - const: xandesperf
+          description:
+            The Andes Technology AndeStar V5 performance extension (lea,
+            bbc/bbs, beqc/bnec, bfos/bfoz, ffb/ffzmism/ffmism/flmism and the
+            gp-relative loads and stores), present when mmsc_cfg.EV5PE is set.
+
+        - const: xandescodense
+          description:
+            The Andes Technology CoDense code-size extension (exec.it), present
+            when mmsc_cfg.ECD is set.
 
     allOf:
       # Zcb depends on Zca

@@ -308,6 +308,12 @@ const struct riscv_isa_ext_data riscv_isa_ext[] = {
 	__RISCV_ISA_EXT_DATA(d, RISCV_ISA_EXT_d),
 	__RISCV_ISA_EXT_DATA(q, RISCV_ISA_EXT_q),
 	__RISCV_ISA_EXT_SUPERSET(c, RISCV_ISA_EXT_c, riscv_c_exts),
+	/*
+	 * P, packed SIMD / DSP: still a draft, so only "riscv,isa-extensions" from the
+	 * firmware puts it here -- the Andes A25 implements v0.5 (Andes GCC -mext-dsp,
+	 * -march=...p), and OpenSBI adds it when the core's mmsc_cfg.EDSP says so.
+	 */
+	__RISCV_ISA_EXT_DATA(p, RISCV_ISA_EXT_p),
 	__RISCV_ISA_EXT_SUPERSET(v, RISCV_ISA_EXT_v, riscv_v_exts),
 	__RISCV_ISA_EXT_DATA(h, RISCV_ISA_EXT_h),
 	__RISCV_ISA_EXT_SUPERSET_VALIDATE(zicbom, RISCV_ISA_EXT_ZICBOM, riscv_xlinuxenvcfg_exts,

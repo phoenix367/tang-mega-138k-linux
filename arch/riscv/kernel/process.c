@@ -180,6 +180,7 @@ void flush_thread(void)
 	memset(&current->thread.vstate, 0, sizeof(struct __riscv_v_ext_state));
 	clear_tsk_thread_flag(current, TIF_RISCV_V_DEFER_RESTORE);
 #endif
+	andes_ustate_reset(current);
 }
 
 void arch_release_task_struct(struct task_struct *tsk)
@@ -192,6 +193,7 @@ void arch_release_task_struct(struct task_struct *tsk)
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
 	fstate_save(src, task_pt_regs(src));
+	andes_ustate_save(src);		/* a child inherits the live DSP flag / exec.it table */
 	*dst = *src;
 	/* clear entire V context, including datap for a new task */
 	memset(&dst->thread.vstate, 0, sizeof(struct __riscv_v_ext_state));

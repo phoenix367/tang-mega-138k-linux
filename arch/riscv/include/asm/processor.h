@@ -107,6 +107,11 @@ struct thread_struct {
 	struct __riscv_v_ext_state vstate;
 	unsigned long align_ctl;
 	struct __riscv_v_ext_state kernel_vstate;
+#ifdef CONFIG_RISCV_ISA_VENDOR_EXT_ANDES
+	/* Andes user CSRs, per task when the core has them (asm/switch_to.h) */
+	unsigned long andes_ucode;	/* DSP (P draft v0.5): overflow flag */
+	unsigned long andes_uitb;	/* CoDense: exec.it table base */
+#endif
 #ifdef CONFIG_SMP
 	/* Flush the icache on migration */
 	bool force_icache_flush;

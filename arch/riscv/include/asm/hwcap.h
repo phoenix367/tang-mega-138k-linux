@@ -17,6 +17,7 @@
 #define RISCV_ISA_EXT_h		('h' - 'a')
 #define RISCV_ISA_EXT_i		('i' - 'a')
 #define RISCV_ISA_EXT_m		('m' - 'a')
+#define RISCV_ISA_EXT_p		('p' - 'a')	/* the draft packed-SIMD / DSP extension */
 #define RISCV_ISA_EXT_q		('q' - 'a')
 #define RISCV_ISA_EXT_v		('v' - 'a')
 
